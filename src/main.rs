@@ -2,6 +2,26 @@ use std::fs::File;
 use std::io::{self, BufRead, BufReader};
 use std::path::Path;
 
+
+#[derive(Debug)]
+struct TraceLine {
+    pc: u64,
+    taken: bool,
+}
+
+fn parse_trace_line(line: &str) -> TraceLine {
+    let mut parts = line.split_whitespace();
+
+    let pc_str = parts.next().expect("pc not a number");
+    let pc_str = pc_str.trim_start_matches("0x");
+    
+    let taken_str = parts.next().expect("pc not a number");
+    let pc = u64::from_str_radix(pc_str, 16).expect("pc is a bad number");
+    let taken = taken_str == "1";
+
+    TraceLine { pc, taken }
+}
+
 fn main() -> io::Result<()> {
     let path = Path::new("traces/trace_01");
     let file = File::open(path)?;
@@ -9,7 +29,8 @@ fn main() -> io::Result<()> {
 
     for line in reader.lines() {
         let line = line?;
-        println!("ln: {}", line);
+        let trace_line = parse_trace_line(&line);
+        println!("{:?}", trace_line);
     }
     Ok(())
 }
