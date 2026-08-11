@@ -2,6 +2,9 @@ use std::fs::File;
 use std::io::{self, BufRead, BufReader};
 use std::path::Path;
 
+
+const BASE_PREDICTOR_SIZE = 200;
+
 #[derive(Debug)]
 struct TraceLine {
     pc: u64,
@@ -22,6 +25,19 @@ impl TraceLine {
         TraceLine { pc, taken }
     }
 }
+
+
+
+struct Tage { 
+    base_predictor: Vec<u8>,
+}
+
+impl Tage { 
+    fn new() -> Self { 
+            Tage { base_predictor: vec![2, BASE_PREDICTOR_SIZE] }
+    }
+}
+
 
 fn main() -> io::Result<()> {
     let path = Path::new("traces/trace_01");
