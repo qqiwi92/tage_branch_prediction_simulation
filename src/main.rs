@@ -94,13 +94,11 @@ impl Stats {
     }
 }
 
-fn main() -> io::Result<()> {
-    let mut tage = Tage::new();
-    let mut stats = Stats::new();
-
-    let path = Path::new("traces/trace_03");
+fn run_trace(path: &Path, tage: &mut Tage) -> io::Result<Stats> {
     let file = File::open(path)?;
     let reader = BufReader::new(file);
+
+    let mut stats = Stats::new();
 
     for line in reader.lines() {
         let line = line?;
@@ -109,8 +107,18 @@ fn main() -> io::Result<()> {
         tage.update(prediction, trace_line.taken);
         stats.add_result(prediction.taken == trace_line.taken);
     }
+    Ok(stats)
+}
 
-    println!("{}", stats.get_result());
+fn main() -> io::Result<()> {
+    let mut tage = Tage::new();
 
+    for i in 1..=10 {
+        let path_str = format!("traces/trace_{i:02}");
+        let path = Path::new(&path_str);
+
+        let stats = run_trace(path, &mut tage).expect("bad trace stats");
+        println!("{}", stats.get_result());
+    }
     Ok(())
 }
