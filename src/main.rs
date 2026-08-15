@@ -55,7 +55,7 @@ impl Tage {
             taken: self.predict_base(index),
         }
     }
-    fn learn(&mut self, meta: PredictionResult, actual_result: bool) {
+    fn update(&mut self, meta: PredictionResult, actual_result: bool) {
         let counter = &mut self.base_predictor[meta.t0_index];
 
         if actual_result {
@@ -71,7 +71,7 @@ impl Tage {
 }
 
 fn main() -> io::Result<()> {
-    let tage = Tage::new();
+    let mut tage = Tage::new();
 
     let path = Path::new("traces/trace_01");
     let file = File::open(path)?;
@@ -80,8 +80,10 @@ fn main() -> io::Result<()> {
     for line in reader.lines() {
         let line = line?;
         let trace_line = TraceLine::parse(&line);
+        let prediction = tage.predict(&trace_line);
         println!("{:?}", trace_line);
-        println!("{:?}", tage.predict(&trace_line));
+        println!("{:?}", prediction.taken);
+        tage.update(prediction, trace_line.taken);
     }
     Ok(())
 }
