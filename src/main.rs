@@ -70,10 +70,35 @@ impl Tage {
     }
 }
 
+struct Stats {
+    total: usize,
+    correct: usize,
+}
+
+impl Stats {
+    fn new() -> Self {
+        Stats {
+            total: 0,
+            correct: 0,
+        }
+    }
+    fn add_result(&mut self, was_is_correct: bool) {
+        self.total += 1;
+        self.correct += was_is_correct as usize;
+    }
+    fn get_result(self: &Stats) -> f32 {
+        if self.total == 0 {
+            return 0.0;
+        }
+        return (self.correct as f32) / (self.total as f32);
+    }
+}
+
 fn main() -> io::Result<()> {
     let mut tage = Tage::new();
+    let mut stats = Stats::new();
 
-    let path = Path::new("traces/trace_01");
+    let path = Path::new("traces/trace_03");
     let file = File::open(path)?;
     let reader = BufReader::new(file);
 
@@ -81,9 +106,11 @@ fn main() -> io::Result<()> {
         let line = line?;
         let trace_line = TraceLine::parse(&line);
         let prediction = tage.predict(&trace_line);
-        println!("{:?}", trace_line);
-        println!("{:?}", prediction.taken);
         tage.update(prediction, trace_line.taken);
+        stats.add_result(prediction.taken == trace_line.taken);
     }
+
+    println!("{}", stats.get_result());
+
     Ok(())
 }
