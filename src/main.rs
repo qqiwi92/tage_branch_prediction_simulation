@@ -109,10 +109,13 @@ enum PredictionResultMeta {
     },
     Tagged {
         provider_table: usize,
-        alt_table: usize,
+        alt_table: Option<usize>,
 
-        provider_predictor: Option<SmartPredictionEntry>,
+        provider_predictor: SmartPredictionEntry,
         alt_predictor: Option<SmartPredictionEntry>,
+
+        provider_index: usize,
+        alt_index: Option<usize>,
     },
     None,
 }
@@ -180,6 +183,9 @@ impl Tage {
             global_history_register: GlobalHistoryRegister::new(MAX_HISTORY_LENGTH),
         }
     }
+    fn allocate_entry(&self, which_table: usize) {
+        todo!()
+    }
     fn predict_base(&self, trace_line: &TraceLine) -> PredictionResultMeta {
         let index = Utils::get_t0_index(trace_line.pc);
 
@@ -193,8 +199,11 @@ impl Tage {
     fn predicict_smart(&self, trace_line: &TraceLine) -> PredictionResultMeta {
         let mut provider_predictor: Option<SmartPredictionEntry> = None;
         let mut provider_table: usize = 0;
+        let mut provider_index: usize = 0;
+
         let mut alt_predictor: Option<SmartPredictionEntry> = None;
-        let mut alt_table: usize = 0;
+        let mut alt_table: Option<usize> = None;
+        let mut alt_index: Option<usize> = None;
 
         for (i, predictor) in self.smart_predictors.iter().enumerate().rev() {
             let table_index = predictor.get_table_index(trace_line.pc as usize);
@@ -205,29 +214,38 @@ impl Tage {
                     (None, _) => {
                         provider_predictor = Some(table_entry);
                         provider_table = i;
+                        provider_index = table_index;
                     }
                     (Some(_), None) => {
                         alt_predictor = Some(table_entry);
-                        alt_table = i;
+                        alt_table = Some(i);
+                        alt_index = Some(table_index);
                         break;
                     }
                     _ => {}
                 }
             }
         }
-        return PredictionResultMeta::Tagged {
-            provider_table,
-            alt_table,
-            provider_predictor,
-            alt_predictor,
-        };
+
+        if let Some(provider_predictor) = provider_predictor {
+            return PredictionResultMeta::Tagged {
+                provider_table,
+                alt_table,
+                provider_predictor: provider_predictor,
+                alt_predictor,
+                alt_index,
+                provider_index,
+            };
+        } else {
+            return PredictionResultMeta::None;
+        }
     }
 
     fn predict(&self, trace_line: &TraceLine) -> PredictionResult {
         let predict_smart = self.predicict_smart(trace_line);
 
         if let PredictionResultMeta::Tagged {
-            provider_predictor: Some(entry),
+            provider_predictor: entry,
             ..
         } = predict_smart
         {
@@ -247,20 +265,24 @@ impl Tage {
 
         unreachable!()
     }
-    fn update(&mut self, prediction: PredictionResult, actual_result: bool) {
+    fn update(&mut self, prediction: PredictionResult, trace_line: &TraceLine) {
         match prediction.meta {
             PredictionResultMeta::Base {
-                prediction,
                 t0_index,
+                prediction,
             } => {
                 let counter = &mut self.base_predictor[t0_index];
 
-                if actual_result {
+                if trace_line.taken {
                     *counter = Utils::bounded_increment(*counter, 3);
                 } else {
                     if *counter > 0 {
                         *counter = Utils::bounded_decrement(*counter);
                     }
+                }
+
+                if prediction != trace_line.taken {
+                    self.allocate_entry(1);
                 }
             }
             PredictionResultMeta::Tagged {
@@ -268,8 +290,36 @@ impl Tage {
                 alt_table,
                 provider_predictor,
                 alt_predictor,
+                alt_index,
+                provider_index,
             } => {
-                todo!()
+                let alt_was_right =
+                if let Some(alt_table) = alt_table {
+                    let alt_index = alt_index.expect(
+                        "alt_index must exist"
+                    );
+                    let mut alt_predictor =
+                        &mut self.smart_predictors[alt_table].prediction_table[alt_index];
+                   alt_predictor.decide() == trace_line.taken
+                } else {
+                    match self.predict_base(trace_line) {
+                        PredictionResultMeta::Base { t0_index, prediction } => {prediction == trace_line.taken}
+                        _ => unreachable!(),
+                    }
+                };
+                let mut provider_predictor =
+                    &mut self.smart_predictors[provider_table].prediction_table[provider_index];
+                let provider_was_right = provider_predictor.decide() == trace_line.taken;
+                if provider_was_right && !alt_was_right {
+                    provider_predictor.usefulness = provider_predictor.usefulness.saturating_add(1);
+                } else if !provider_was_right && alt_was_right {
+                    if let Some(alt_table) = alt_table {
+                        let alt_index = alt_index.unwrap();
+                        let mut alt_predictor =
+                            &mut self.smart_predictors[alt_table].prediction_table[alt_index];
+                        alt_predictor.usefulness = alt_predictor.usefulness.saturating_add(1);
+                    }
+                }
             }
             _ => {}
         }
@@ -310,7 +360,7 @@ fn run_trace(path: &Path, tage: &mut Tage) -> io::Result<Stats> {
         let line = line?;
         let trace_line = TraceLine::parse(&line);
         let prediction = tage.predict(&trace_line);
-        tage.update(prediction, trace_line.taken);
+        tage.update(prediction, &trace_line);
         stats.add_result(prediction.taken == trace_line.taken);
     }
     Ok(stats)
