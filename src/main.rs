@@ -1,5 +1,4 @@
 use std::fs::File;
-use std::hint;
 use std::io::{self, BufRead, BufReader};
 use std::path::Path;
 
@@ -19,10 +18,10 @@ impl TraceLine {
     fn parse(line: &str) -> Self {
         let mut parts = line.split_whitespace();
 
-        let pc_str = parts.next().expect("pc not a number");
+        let pc_str = parts.next().expect("trace: pc not a number");
         let pc_str = pc_str.trim_start_matches("0x");
 
-        let taken_str = parts.next().expect("pc not a number");
+        let taken_str = parts.next().expect("trace: taken not a bool");
         let pc = u64::from_str_radix(pc_str, 16).expect("pc is a bad number");
         let taken = taken_str == "1";
 
@@ -43,6 +42,9 @@ impl SmartPredictionEntry {
             verdict: 0b10,
             tag: 0,
         }
+    }
+    fn decide(&self) -> bool {
+        return self.verdict > 1;
     }
 }
 
@@ -109,9 +111,10 @@ enum PredictionResultMeta {
         provider_table: usize,
         alt_table: usize,
 
-        provider_prediction: bool,
-        alt_prediction: bool,
+        provider_predictor: Option<SmartPredictionEntry>,
+        alt_predictor: Option<SmartPredictionEntry>,
     },
+    None,
 }
 
 #[derive(Clone, Copy)]
@@ -187,24 +190,24 @@ impl Tage {
             prediction: prediction > 0b01,
         };
     }
-    fn predicict_smart(&self, trace_line: &TraceLine) -> bool {
-        let mut provider_predictor: Option<&SmartPredictionEntry> = None;
+    fn predicict_smart(&self, trace_line: &TraceLine) -> PredictionResultMeta {
+        let mut provider_predictor: Option<SmartPredictionEntry> = None;
         let mut provider_table: usize = 0;
-        let mut alt_predictor: Option<&SmartPredictionEntry> = None;
+        let mut alt_predictor: Option<SmartPredictionEntry> = None;
         let mut alt_table: usize = 0;
 
         for (i, predictor) in self.smart_predictors.iter().enumerate().rev() {
             let table_index = predictor.get_table_index(trace_line.pc as usize);
-            let table_entry = &predictor.prediction_table[table_index];
+            let table_entry = predictor.prediction_table[table_index];
 
             if table_entry.tag == predictor.get_tag(trace_line.pc as usize) {
                 match (provider_predictor, alt_predictor) {
                     (None, _) => {
-                        provider_predictor = Some(&table_entry);
+                        provider_predictor = Some(table_entry);
                         provider_table = i;
                     }
                     (Some(_), None) => {
-                        alt_predictor = Some(&table_entry);
+                        alt_predictor = Some(table_entry);
                         alt_table = i;
                         break;
                     }
@@ -212,16 +215,43 @@ impl Tage {
                 }
             }
         }
-        todo!("prediction")
+        return PredictionResultMeta::Tagged {
+            provider_table,
+            alt_table,
+            provider_predictor,
+            alt_predictor,
+        };
     }
 
     fn predict(&self, trace_line: &TraceLine) -> PredictionResult {
-        self.predicict_smart(trace_line);
-        let predict_base: PredictionResultMeta = self.predict_base(trace_line);
-        PredictionResult {
-            meta: predict_base,
-            taken: false,
+        let predict_smart = self.predicict_smart(trace_line);
+        let predict_base = self.predict_base(trace_line);
+
+        let mut final_prediction: PredictionResult = match predict_base {
+            PredictionResultMeta::Base { prediction, .. } => PredictionResult {
+                taken: prediction,
+                meta: predict_base,
+            },
+            _ => unreachable!(),
+        };
+
+        match predict_smart {
+            PredictionResultMeta::None => {}
+            PredictionResultMeta::Base {..}=> {
+                unreachable!()
+            }
+            PredictionResultMeta::Tagged {
+                provider_predictor,..
+            } => {
+                if !provider_predictor.is_none() {
+                    final_prediction = PredictionResult {
+                        taken: provider_predictor.unwrap().decide(),
+                        meta: predict_smart,
+                    };
+                }
+            }
         }
+        return final_prediction;
     }
     fn update(&mut self, prediction: PredictionResult, actual_result: bool) {
         match prediction.meta {
@@ -235,18 +265,19 @@ impl Tage {
                     *counter = Utils::bounded_increment(*counter, 3);
                 } else {
                     if *counter > 0 {
-                        *counter -= Utils::bounded_decrement(*counter);
+                        *counter = Utils::bounded_decrement(*counter);
                     }
                 }
             }
             PredictionResultMeta::Tagged {
                 provider_table,
                 alt_table,
-                provider_prediction,
-                alt_prediction,
+                provider_predictor,
+                alt_predictor,
             } => {
                 todo!()
             }
+            _ => {}
         }
     }
 }
