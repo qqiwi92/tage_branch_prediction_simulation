@@ -2,6 +2,8 @@ use std::fs::File;
 use std::io::{self, BufRead, BufReader};
 use std::path::Path;
 
+use crate::PredictionResultMeta::Base;
+
 const BASE_PREDICTOR_SIZE: usize = 4096;
 const SMART_PREDICTOR_AMOUNT: usize = 6;
 const SMART_PREDICTOR_FIRST_SIZE: usize = 5;
@@ -64,9 +66,24 @@ struct Tage {
 }
 
 #[derive(Clone, Copy)]
+enum PredictionResultMeta {
+    Base {
+        t0_index: usize,
+        prediction: bool,
+    },
+    Tagged {
+        provider_table: usize,
+        alt_table: usize,
+
+        provider_prediction: bool,
+        alt_prediction: bool,
+    },
+}
+
+#[derive(Clone, Copy)]
 struct PredictionResult {
     taken: bool,
-    t0_index: usize,
+    meta: PredictionResultMeta,
 }
 
 struct Utils {}
@@ -74,9 +91,15 @@ impl Utils {
     const fn get_perspicacity(i: usize) -> usize {
         return SMART_PREDICTOR_FIRST_SIZE + i * i;
     }
-
     const fn get_t0_index(pc: u64) -> usize {
         (pc & 0xFFF) as usize // get last 12 bit
+    }
+    const fn bounded_increment(val: u16, max_val: u16) -> u16 {
+        let next = val.saturating_add(1);
+        return if next > max_val { max_val } else { next };
+    }
+    const fn bounded_decrement(val: u16) -> u16 {
+        return if val == 0 { 0 } else { val - 1 };
     }
 }
 impl Tage {
@@ -95,25 +118,46 @@ impl Tage {
         let prediction = self.base_predictor[index];
         return prediction > 0b01;
     }
+    fn predicict_smart(&self) -> bool {
+        
+        false
+    }
 
     fn predict(&self, trace_line: &TraceLine) -> PredictionResult {
+        self.predicict_smart();
         let index = Utils::get_t0_index(trace_line.pc);
-
+        let predict_base = self.predict_base(index);
         PredictionResult {
-            t0_index: index,
-            taken: self.predict_base(index),
+            meta: PredictionResultMeta::Base {
+                t0_index: index,
+                prediction: predict_base,
+            },
+            taken: predict_base,
         }
     }
-    fn update(&mut self, meta: PredictionResult, actual_result: bool) {
-        let counter = &mut self.base_predictor[meta.t0_index];
+    fn update(&mut self, prediction: PredictionResult, actual_result: bool) {
+        match prediction.meta {
+            PredictionResultMeta::Base {
+                prediction,
+                t0_index,
+            } => {
+                let counter = &mut self.base_predictor[t0_index];
 
-        if actual_result {
-            if *counter < 3 {
-                *counter += 1;
+                if actual_result {
+                    *counter = Utils::bounded_increment(*counter, 3);
+                } else {
+                    if *counter > 0 {
+                        *counter -= Utils::bounded_decrement(*counter);
+                    }
+                }
             }
-        } else {
-            if *counter > 0 {
-                *counter -= 1;
+            PredictionResultMeta::Tagged {
+                provider_table,
+                alt_table,
+                provider_prediction,
+                alt_prediction,
+            } => {
+                todo!()
             }
         }
     }
