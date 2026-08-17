@@ -1,8 +1,7 @@
 use std::fs::File;
+use std::hint;
 use std::io::{self, BufRead, BufReader};
 use std::path::Path;
-
-use crate::PredictionResultMeta::Base;
 
 const BASE_PREDICTOR_SIZE: usize = 4096;
 const SMART_PREDICTOR_AMOUNT: usize = 6;
@@ -60,9 +59,29 @@ impl SmartPredictor {
     }
 }
 
+struct GlobalHistoryRegister {
+    history: std::collections::VecDeque<bool>,
+}
+
+impl GlobalHistoryRegister {
+    fn new(max_len: usize) -> Self {
+        GlobalHistoryRegister {
+            history: std::collections::VecDeque::from(vec![false; max_len]),
+        }
+    }
+    fn get_nth(&self, n: usize) -> bool {
+        return self.history.get(n).copied().unwrap_or(false);
+    }
+    fn push(&mut self, new_bit: bool) {
+        self.history.push_front(new_bit);
+        self.history.pop_back();
+    }
+}
+
 struct Tage {
     base_predictor: Vec<u16>,
     smart_predictors: Vec<SmartPredictor>,
+    global_history_register: GlobalHistoryRegister,
 }
 
 #[derive(Clone, Copy)]
@@ -84,6 +103,24 @@ enum PredictionResultMeta {
 struct PredictionResult {
     taken: bool,
     meta: PredictionResultMeta,
+}
+
+struct CSR {
+    val: u32,
+    out_bits: usize,
+    hist_len: usize,
+}
+impl CSR {
+    fn update(&mut self, new_bit: bool, old_bit: bool) {
+        let mut new_val = (self.val << 1) | (self.val >> (self.out_bits - 1));
+        new_val &= (1 << self.out_bits) - 1;
+        new_val ^= (new_bit as u32);
+
+        let old_pos = self.hist_len % self.out_bits;
+        new_val ^= (old_bit as u32) << old_pos;
+
+        self.val = new_val;
+    }
 }
 
 struct Utils {}
@@ -119,7 +156,6 @@ impl Tage {
         return prediction > 0b01;
     }
     fn predicict_smart(&self) -> bool {
-        
         false
     }
 
@@ -205,6 +241,13 @@ fn run_trace(path: &Path, tage: &mut Tage) -> io::Result<Stats> {
 
 fn main() -> io::Result<()> {
     let mut tage = Tage::new(SMART_PREDICTOR_AMOUNT);
+
+    let mut csr = CSR {
+        hist_len: 130,
+        out_bits: 12,
+        val: 7,
+    };
+    csr.update(true, false);
 
     for i in 1..=10 {
         let path_str = format!("traces/trace_{i:02}");
