@@ -3,6 +3,9 @@ use std::io::{self, BufRead, BufReader};
 use std::path::Path;
 
 const BASE_PREDICTOR_SIZE: usize = 4096;
+const SMART_PREDICTOR_AMOUNT: usize = 6;
+const SMART_PREDICTOR_FIRST_SIZE: usize = 5;
+const SMART_PREDICTOR_TABLE_SIZE: usize = 2048;
 
 #[derive(Debug)]
 struct TraceLine {
@@ -24,9 +27,40 @@ impl TraceLine {
         TraceLine { pc, taken }
     }
 }
+#[derive(Clone, Copy)]
+struct SmartPredictionEntry {
+    usefulness: u8,
+    verdict: u8,
+    tag: u16,
+}
+
+impl SmartPredictionEntry {
+    fn new() -> Self {
+        Self {
+            usefulness: 0,
+            verdict: 0b10,
+            tag: 0,
+        }
+    }
+}
+
+struct SmartPredictor {
+    perspicacity: u8,
+    prediction_table: Vec<SmartPredictionEntry>,
+}
+
+impl SmartPredictor {
+    fn new(perspicacity: u8) -> Self {
+        Self {
+            prediction_table: vec![SmartPredictionEntry::new(); SMART_PREDICTOR_TABLE_SIZE],
+            perspicacity,
+        }
+    }
+}
 
 struct Tage {
     base_predictor: Vec<u16>,
+    smart_predictors: Vec<SmartPredictor>,
 }
 
 #[derive(Clone, Copy)]
@@ -34,21 +68,36 @@ struct PredictionResult {
     taken: bool,
     t0_index: usize,
 }
+
+struct Utils {}
+impl Utils {
+    const fn get_perspicacity(i: usize) -> usize {
+        return SMART_PREDICTOR_FIRST_SIZE + i * i;
+    }
+
+    const fn get_t0_index(pc: u64) -> usize {
+        (pc & 0xFFF) as usize // get last 12 bit
+    }
+}
 impl Tage {
-    fn new() -> Self {
+    fn new(amount: usize) -> Self {
+        let mut smart_predictors: Vec<SmartPredictor> = vec![];
+        smart_predictors.reserve(amount);
+        for i in 1..=amount {
+            smart_predictors.push(SmartPredictor::new(Utils::get_perspicacity(i) as u8));
+        }
         Tage {
             base_predictor: vec![2; BASE_PREDICTOR_SIZE],
+            smart_predictors,
         }
     }
     fn predict_base(&self, index: usize) -> bool {
         let prediction = self.base_predictor[index];
-        return prediction > 0b10;
+        return prediction > 0b01;
     }
-    fn get_t0_index(pc: u64) -> usize {
-        (pc & 0xFFF) as usize // get last 12 bit
-    }
+
     fn predict(&self, trace_line: &TraceLine) -> PredictionResult {
-        let index = Tage::get_t0_index(trace_line.pc);
+        let index = Utils::get_t0_index(trace_line.pc);
 
         PredictionResult {
             t0_index: index,
@@ -111,7 +160,7 @@ fn run_trace(path: &Path, tage: &mut Tage) -> io::Result<Stats> {
 }
 
 fn main() -> io::Result<()> {
-    let mut tage = Tage::new();
+    let mut tage = Tage::new(SMART_PREDICTOR_AMOUNT);
 
     for i in 1..=10 {
         let path_str = format!("traces/trace_{i:02}");
