@@ -192,8 +192,33 @@ impl Tage {
             global_history_register: GlobalHistoryRegister::new(MAX_HISTORY_LENGTH),
         }
     }
-    fn allocate_entry(&self, which_table: usize) {
-        todo!()
+    fn allocate_entry(&mut self, which_table: usize, trace_line: &TraceLine) {
+        let pc = trace_line.pc as usize;
+
+        let mut full_run = true;
+        for table in which_table..SMART_PREDICTOR_AMOUNT {
+            let predictor = &mut self.smart_predictors[table];
+            let index = predictor.get_table_index(pc);
+
+            if (predictor.prediction_table[index].usefulness == 0) {
+                let tag = predictor.get_tag(trace_line.pc as usize);
+                let table_entry = &mut predictor.prediction_table[index];
+                table_entry.tag = tag;
+                table_entry.usefulness = 0;
+                table_entry.verdict = 0b10;
+                full_run = false;
+                break;
+            }
+        }
+        if full_run {
+            for table in which_table..SMART_PREDICTOR_AMOUNT {
+                let predictor = &mut self.smart_predictors[table];
+                let index = predictor.get_table_index(pc);
+
+                let usefulness = &mut predictor.prediction_table[index].usefulness;
+                *usefulness = Utils::bounded_decrement(*usefulness as u16) as u8;
+            }
+        }
     }
     fn predict_base(&self, trace_line: &TraceLine) -> PredictionResultMeta {
         let index = Utils::get_t0_index(trace_line.pc);
@@ -291,7 +316,7 @@ impl Tage {
                 }
 
                 if prediction != trace_line.taken {
-                    self.allocate_entry(1);
+                    self.allocate_entry(1, &trace_line);
                 }
             }
             PredictionResultMeta::Tagged {
@@ -323,7 +348,7 @@ impl Tage {
                 } else if !provider_was_right && alt_was_right {
                     if let Some(alt_table) = alt_table {
                         let alt_index = alt_index.unwrap();
-                        let mut alt_predictor =
+                        let alt_predictor =
                             &mut self.smart_predictors[alt_table].prediction_table[alt_index];
                         alt_predictor.usefulness = Utils::bounded_increment(
                             alt_predictor.usefulness as u16,
@@ -333,10 +358,13 @@ impl Tage {
                 }
 
                 if !provider_was_right {
-                    self.allocate_entry(Utils::bounded_increment(
-                        provider_table as u16,
-                        SMART_PREDICTOR_AMOUNT as u16,
-                    ) as usize);
+                    self.allocate_entry(
+                        Utils::bounded_increment(
+                            provider_table as u16,
+                            SMART_PREDICTOR_AMOUNT as u16 + 1,
+                        ) as usize,
+                        trace_line,
+                    );
                 }
             }
             _ => {}
