@@ -7,8 +7,9 @@ const SMART_PREDICTOR_AMOUNT: usize = 6;
 const SMART_PREDICTOR_FIRST_SIZE: usize = 5;
 const SMART_PREDICTOR_TABLE_SIZE: usize = 2048;
 const MAX_HISTORY_LENGTH: usize = 256;
-const MAX_USEFULNESS_VALUE: usize = 3;
 const MAX_VERDICT_VALUE: usize = 3;
+const AMOUNT_OF_FILES: usize = 1;
+
 #[derive(Debug)]
 struct TraceLine {
     pc: u64,
@@ -416,7 +417,7 @@ fn run_trace(path: &Path, tage: &mut Tage) -> io::Result<Stats> {
 fn main() -> io::Result<()> {
     let mut tage = Tage::new(SMART_PREDICTOR_AMOUNT);
 
-    for i in 1..=10 {
+    for i in 1..=AMOUNT_OF_FILES {
         let path_str = format!("traces/trace_{i:02}");
         let path = Path::new(&path_str);
 
