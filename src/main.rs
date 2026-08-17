@@ -7,7 +7,8 @@ const SMART_PREDICTOR_AMOUNT: usize = 6;
 const SMART_PREDICTOR_FIRST_SIZE: usize = 5;
 const SMART_PREDICTOR_TABLE_SIZE: usize = 2048;
 const MAX_HISTORY_LENGTH: usize = 256;
-
+const MAX_USEFULNESS_VALUE: usize = 3;
+const MAX_VERDICT_VALUE: usize = 3;
 #[derive(Debug)]
 struct TraceLine {
     pc: u64,
@@ -45,6 +46,14 @@ impl SmartPredictionEntry {
     }
     fn decide(&self) -> bool {
         return self.verdict > 1;
+    }
+    fn update(&mut self, taken: bool) {
+        if taken {
+            self.verdict =
+                Utils::bounded_increment(self.verdict as u16, MAX_VERDICT_VALUE as u16) as u8;
+        } else {
+            self.verdict = Utils::bounded_decrement(self.verdict as u16) as u8;
+        }
     }
 }
 
@@ -288,28 +297,27 @@ impl Tage {
             PredictionResultMeta::Tagged {
                 provider_table,
                 alt_table,
-                provider_predictor,
-                alt_predictor,
                 alt_index,
                 provider_index,
+                ..
             } => {
-                let alt_was_right =
-                if let Some(alt_table) = alt_table {
-                    let alt_index = alt_index.expect(
-                        "alt_index must exist"
-                    );
-                    let mut alt_predictor =
+                let alt_was_right = if let Some(alt_table) = alt_table {
+                    let alt_index = alt_index.expect("alt_index must exist");
+                    let alt_predictor =
                         &mut self.smart_predictors[alt_table].prediction_table[alt_index];
-                   alt_predictor.decide() == trace_line.taken
+                    alt_predictor.decide() == trace_line.taken
                 } else {
                     match self.predict_base(trace_line) {
-                        PredictionResultMeta::Base { t0_index, prediction } => {prediction == trace_line.taken}
+                        PredictionResultMeta::Base { prediction, .. } => {
+                            prediction == trace_line.taken
+                        }
                         _ => unreachable!(),
                     }
                 };
-                let mut provider_predictor =
+                let provider_predictor =
                     &mut self.smart_predictors[provider_table].prediction_table[provider_index];
                 let provider_was_right = provider_predictor.decide() == trace_line.taken;
+                provider_predictor.update(trace_line.taken);
                 if provider_was_right && !alt_was_right {
                     provider_predictor.usefulness = provider_predictor.usefulness.saturating_add(1);
                 } else if !provider_was_right && alt_was_right {
@@ -317,8 +325,18 @@ impl Tage {
                         let alt_index = alt_index.unwrap();
                         let mut alt_predictor =
                             &mut self.smart_predictors[alt_table].prediction_table[alt_index];
-                        alt_predictor.usefulness = alt_predictor.usefulness.saturating_add(1);
+                        alt_predictor.usefulness = Utils::bounded_increment(
+                            alt_predictor.usefulness as u16,
+                            MAX_USEFULNESS_VALUE as u16,
+                        ) as u8;
                     }
+                }
+
+                if !provider_was_right {
+                    self.allocate_entry(Utils::bounded_increment(
+                        provider_table as u16,
+                        SMART_PREDICTOR_AMOUNT as u16,
+                    ) as usize);
                 }
             }
             _ => {}
