@@ -7,6 +7,7 @@ const BASE_PREDICTOR_SIZE: usize = 4096;
 const SMART_PREDICTOR_AMOUNT: usize = 6;
 const SMART_PREDICTOR_FIRST_SIZE: usize = 5;
 const SMART_PREDICTOR_TABLE_SIZE: usize = 2048;
+const MAX_HISTORY_LENGTH: usize = 256;
 
 #[derive(Debug)]
 struct TraceLine {
@@ -48,14 +49,28 @@ impl SmartPredictionEntry {
 struct SmartPredictor {
     perspicacity: u8,
     prediction_table: Vec<SmartPredictionEntry>,
+    csr: CSR,
 }
 
 impl SmartPredictor {
     fn new(perspicacity: u8) -> Self {
+        let hist_len = Utils::calculate_history_len(perspicacity);
         Self {
             prediction_table: vec![SmartPredictionEntry::new(); SMART_PREDICTOR_TABLE_SIZE],
             perspicacity,
+            csr: CSR::new(perspicacity as usize, hist_len),
         }
+    }
+    fn get_table_index(&self, pc: usize) -> usize {
+        let mut result: usize = pc ^ (self.csr.val as usize);
+        result %= MAX_HISTORY_LENGTH;
+        result
+    }
+    fn get_tag(&self, pc: usize) -> u16 {
+        let mut result: usize = pc >> 2;
+        result ^= (self.csr.val as usize) << 1;
+        result %= 1 << self.perspicacity;
+        result as u16
     }
 }
 
@@ -111,10 +126,17 @@ struct CSR {
     hist_len: usize,
 }
 impl CSR {
+    fn new(out_bits: usize, hist_len: usize) -> Self {
+        CSR {
+            val: 0,
+            out_bits,
+            hist_len,
+        }
+    }
     fn update(&mut self, new_bit: bool, old_bit: bool) {
         let mut new_val = (self.val << 1) | (self.val >> (self.out_bits - 1));
         new_val &= (1 << self.out_bits) - 1;
-        new_val ^= (new_bit as u32);
+        new_val ^= new_bit as u32;
 
         let old_pos = self.hist_len % self.out_bits;
         new_val ^= (old_bit as u32) << old_pos;
@@ -127,6 +149,9 @@ struct Utils {}
 impl Utils {
     const fn get_perspicacity(i: usize) -> usize {
         return SMART_PREDICTOR_FIRST_SIZE + i * i;
+    }
+    const fn calculate_history_len(perspicacity: u8) -> usize {
+        (perspicacity as usize) * 4
     }
     const fn get_t0_index(pc: u64) -> usize {
         (pc & 0xFFF) as usize // get last 12 bit
@@ -149,26 +174,53 @@ impl Tage {
         Tage {
             base_predictor: vec![2; BASE_PREDICTOR_SIZE],
             smart_predictors,
+            global_history_register: GlobalHistoryRegister::new(MAX_HISTORY_LENGTH),
         }
     }
-    fn predict_base(&self, index: usize) -> bool {
+    fn predict_base(&self, trace_line: &TraceLine) -> PredictionResultMeta {
+        let index = Utils::get_t0_index(trace_line.pc);
+
         let prediction = self.base_predictor[index];
-        return prediction > 0b01;
+
+        return PredictionResultMeta::Base {
+            t0_index: index,
+            prediction: prediction > 0b01,
+        };
     }
-    fn predicict_smart(&self) -> bool {
-        false
+    fn predicict_smart(&self, trace_line: &TraceLine) -> bool {
+        let mut provider_predictor: Option<&SmartPredictionEntry> = None;
+        let mut provider_table: usize = 0;
+        let mut alt_predictor: Option<&SmartPredictionEntry> = None;
+        let mut alt_table: usize = 0;
+
+        for (i, predictor) in self.smart_predictors.iter().enumerate().rev() {
+            let table_index = predictor.get_table_index(trace_line.pc as usize);
+            let table_entry = &predictor.prediction_table[table_index];
+
+            if table_entry.tag == predictor.get_tag(trace_line.pc as usize) {
+                match (provider_predictor, alt_predictor) {
+                    (None, _) => {
+                        provider_predictor = Some(&table_entry);
+                        provider_table = i;
+                    }
+                    (Some(_), None) => {
+                        alt_predictor = Some(&table_entry);
+                        alt_table = i;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        todo!("prediction")
     }
 
     fn predict(&self, trace_line: &TraceLine) -> PredictionResult {
-        self.predicict_smart();
-        let index = Utils::get_t0_index(trace_line.pc);
-        let predict_base = self.predict_base(index);
+        self.predicict_smart(trace_line);
+        let predict_base: PredictionResultMeta = self.predict_base(trace_line);
         PredictionResult {
-            meta: PredictionResultMeta::Base {
-                t0_index: index,
-                prediction: predict_base,
-            },
-            taken: predict_base,
+            meta: predict_base,
+            taken: false,
         }
     }
     fn update(&mut self, prediction: PredictionResult, actual_result: bool) {
@@ -241,13 +293,6 @@ fn run_trace(path: &Path, tage: &mut Tage) -> io::Result<Stats> {
 
 fn main() -> io::Result<()> {
     let mut tage = Tage::new(SMART_PREDICTOR_AMOUNT);
-
-    let mut csr = CSR {
-        hist_len: 130,
-        out_bits: 12,
-        val: 7,
-    };
-    csr.update(true, false);
 
     for i in 1..=10 {
         let path_str = format!("traces/trace_{i:02}");
