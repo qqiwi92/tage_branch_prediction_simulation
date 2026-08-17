@@ -345,17 +345,7 @@ impl Tage {
                 provider_predictor.update(trace_line.taken);
                 if provider_was_right && !alt_was_right {
                     provider_predictor.usefulness = provider_predictor.usefulness.saturating_add(1);
-                } else if !provider_was_right && alt_was_right {
-                    if let Some(alt_table) = alt_table {
-                        let alt_index = alt_index.unwrap();
-                        let alt_predictor =
-                            &mut self.smart_predictors[alt_table].prediction_table[alt_index];
-                        alt_predictor.usefulness = Utils::bounded_increment(
-                            alt_predictor.usefulness as u16,
-                            MAX_USEFULNESS_VALUE as u16,
-                        ) as u8;
-                    }
-                }
+                } 
 
                 if !provider_was_right {
                     self.allocate_entry(
