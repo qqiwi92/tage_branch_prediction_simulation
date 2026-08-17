@@ -225,33 +225,27 @@ impl Tage {
 
     fn predict(&self, trace_line: &TraceLine) -> PredictionResult {
         let predict_smart = self.predicict_smart(trace_line);
-        let predict_base = self.predict_base(trace_line);
 
-        let mut final_prediction: PredictionResult = match predict_base {
-            PredictionResultMeta::Base { prediction, .. } => PredictionResult {
+        if let PredictionResultMeta::Tagged {
+            provider_predictor: Some(entry),
+            ..
+        } = predict_smart
+        {
+            return PredictionResult {
+                taken: entry.decide(),
+                meta: predict_smart,
+            };
+        }
+
+        let predict_base = self.predict_base(trace_line);
+        if let PredictionResultMeta::Base { prediction, .. } = predict_base {
+            return PredictionResult {
                 taken: prediction,
                 meta: predict_base,
-            },
-            _ => unreachable!(),
-        };
-
-        match predict_smart {
-            PredictionResultMeta::None => {}
-            PredictionResultMeta::Base {..}=> {
-                unreachable!()
-            }
-            PredictionResultMeta::Tagged {
-                provider_predictor,..
-            } => {
-                if !provider_predictor.is_none() {
-                    final_prediction = PredictionResult {
-                        taken: provider_predictor.unwrap().decide(),
-                        meta: predict_smart,
-                    };
-                }
-            }
+            };
         }
-        return final_prediction;
+
+        unreachable!()
     }
     fn update(&mut self, prediction: PredictionResult, actual_result: bool) {
         match prediction.meta {
