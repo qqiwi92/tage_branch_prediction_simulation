@@ -136,7 +136,7 @@ struct PredictionResult {
 }
 
 struct CSR {
-    val: u32,
+    val: u64,
     out_bits: usize,
     hist_len: usize,
 }
@@ -149,12 +149,15 @@ impl CSR {
         }
     }
     fn update(&mut self, new_bit: bool, old_bit: bool) {
+        if self.out_bits == 0 {
+            return;
+        }
         let mut new_val = (self.val << 1) | (self.val >> (self.out_bits - 1));
         new_val &= (1 << self.out_bits) - 1;
-        new_val ^= new_bit as u32;
+        new_val ^= new_bit as u64;
 
         let old_pos = self.hist_len % self.out_bits;
-        new_val ^= (old_bit as u32) << old_pos;
+        new_val ^= (old_bit as u64) << old_pos;
 
         self.val = new_val;
     }
@@ -191,6 +194,13 @@ impl Tage {
             smart_predictors,
             global_history_register: GlobalHistoryRegister::new(MAX_HISTORY_LENGTH),
         }
+    }
+    fn update_history(&mut self, new_bit: bool) {
+        self.global_history_register.push(new_bit);
+        self.smart_predictors.iter_mut().for_each(|p| {
+            let last_bit = self.global_history_register.get_nth(p.csr.hist_len);
+            p.csr.update(new_bit, last_bit);
+        })
     }
     fn allocate_entry(&mut self, which_table: usize, trace_line: &TraceLine) {
         let pc = trace_line.pc as usize;
@@ -345,7 +355,7 @@ impl Tage {
                 provider_predictor.update(trace_line.taken);
                 if provider_was_right && !alt_was_right {
                     provider_predictor.usefulness = provider_predictor.usefulness.saturating_add(1);
-                } 
+                }
 
                 if !provider_was_right {
                     self.allocate_entry(
@@ -359,6 +369,7 @@ impl Tage {
             }
             _ => {}
         }
+        self.update_history(trace_line.taken);
     }
 }
 
