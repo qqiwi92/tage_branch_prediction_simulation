@@ -1,8 +1,7 @@
 # TAGE branch prediction simulator
 
-TAGE (TAgged GEometric history length) - is a modern branch prediction algorithm. I created this project to better understand how it works under the hood.
+TAGE (TAgged GEometric history length) - is a modern branch prediction algorithm. I created this project to better understand how it works under the hood. No AI used.
 
-! there could be mistakes in code and README, as I wrote it without AI to actually understand what I was doing !
 
 
 
